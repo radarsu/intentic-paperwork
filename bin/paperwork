@@ -1,0 +1,289 @@
+#!/usr/bin/env node
+/* paperwork — the document commands this pack puts on the agent's PATH.
+ *
+ * Deliberately thin: every subcommand is a named pipeline over pandoc / poppler / tesseract, and the value it
+ * adds over calling those directly is the parts an agent gets wrong at 2am — picking the right tool for the
+ * pair of formats, never silently overwriting a file, naming the output predictably, and explaining a missing
+ * binary in terms of the thing the owner has to do about it (approve an image rebuild) rather than "ENOENT".
+ *
+ * Zero dependencies, on purpose. An extension is installed by cloning a repo at a commit — there is no install
+ * step, so `node_modules` would have to be committed. Node's own modules are the whole toolbox. */
+
+import { spawn } from "node:child_process";
+import { access, constants, mkdir, readdir, stat } from "node:fs/promises";
+import { basename, dirname, extname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { TOOLS, defaultTarget, extensionOf, outputPathFor, parsePages, planFor } from "../lib/plan.mjs";
+
+const USAGE = `paperwork — convert, read and rearrange documents
+
+  paperwork convert <file> [--to pdf|md|txt|docx|html] [--out <file>] [--pages 2-5] [--force]
+  paperwork read    <file.pdf> [--pages 2-5]              print the text (stdout)
+  paperwork ocr     <file.pdf|image> [--lang eng]         read a SCAN, via OCR (stdout)
+  paperwork merge   <out.pdf> <in.pdf> [in.pdf …]
+  paperwork split   <file.pdf> [--out-dir <dir>]          one PDF per page
+  paperwork info    <file.pdf>                            pages, size, title, whether it has a text layer
+  paperwork tools                                         what's installed, and what to do if it isn't
+
+Formats: docx, odt, epub, html, md, rst, tex, txt, rtf ⇄ pdf; pdf → md/txt; jpg/png/tiff → pdf.`;
+
+const fail = (message, code = 1) => {
+    process.stderr.write(`paperwork: ${message}\n`);
+    process.exit(code);
+};
+
+const parseFlags = (argv) => {
+    const flags = {};
+    const positional = [];
+    for (let index = 0; index < argv.length; index += 1) {
+        const item = argv[index];
+        if (!item.startsWith(`--`)) {
+            positional.push(item);
+            continue;
+        }
+        const name = item.slice(2);
+        if (name === `force`) {
+            flags.force = true;
+            continue;
+        }
+        index += 1;
+        if (index >= argv.length) {
+            fail(`--${name} needs a value`, 2);
+        }
+        flags[name] = argv[index];
+    }
+    return { flags, positional };
+};
+
+const exists = async (path) => {
+    try {
+        await access(path, constants.F_OK);
+        return true;
+    } catch {
+        return false;
+    }
+};
+
+const which = async (command) => {
+    const dirs = (process.env.PATH ?? ``).split(`:`).filter((entry) => entry !== ``);
+    for (const dir of dirs) {
+        const candidate = join(dir, command);
+        try {
+            await access(candidate, constants.X_OK);
+            return candidate;
+        } catch {
+            continue;
+        }
+    }
+    return undefined;
+};
+
+/* The message that decides whether this pack is usable or infuriating. A missing binary means one of two very
+ * different things, and PAPERWORK_LAYER (set by the image fragment) is what tells them apart: without it the
+ * owner simply hasn't rebuilt yet, and there is a specific place to go and do that. */
+const explainMissing = (command) =>
+    process.env.PAPERWORK_LAYER === `1`
+        ? `${command} is missing even though this image was built with the paperwork layer. The layer may have changed since the last rebuild — re-approve it in Sandbox → Environment and rebuild.`
+        : `${command} isn't in this sandbox yet. This extension ships an image layer that installs it: open Sandbox → Environment, approve the proposal that mentions paperwork, and rebuild. Nothing else here will work until then.`;
+
+const requireTools = async (subcommand, commands) => {
+    for (const command of commands ?? TOOLS[subcommand] ?? []) {
+        if ((await which(command)) === undefined) {
+            fail(explainMissing(command));
+        }
+    }
+};
+
+const run = (command, args, { capture = false } = {}) =>
+    new Promise((resolvePromise) => {
+        const child = spawn(command, args, { stdio: capture ? [`ignore`, `pipe`, `pipe`] : `inherit` });
+        let out = ``;
+        let err = ``;
+        child.stdout?.on(`data`, (chunk) => {
+            out += chunk;
+        });
+        child.stderr?.on(`data`, (chunk) => {
+            err += chunk;
+        });
+        child.on(`error`, (error) => resolvePromise({ code: 127, out, err: error.message }));
+        child.on(`close`, (code) => resolvePromise({ code: code ?? 1, out, err }));
+    });
+
+const runOrFail = async (command, args, options) => {
+    const result = await run(command, args, options);
+    if (result.code !== 0) {
+        fail(`${command} failed${result.err === `` ? `` : `: ${result.err.trim().split(`\n`).slice(-1)[0]}`}`);
+    }
+    return result;
+};
+
+const needFile = async (path) => {
+    if (!(await exists(path))) {
+        fail(`no such file: ${path}`);
+    }
+    return resolve(path);
+};
+
+const convert = async ({ flags, positional }) => {
+    const [input] = positional;
+    if (input === undefined) {
+        fail(`convert needs a file — see "paperwork --help"`, 2);
+    }
+    await needFile(input);
+    const target = (flags.to ?? defaultTarget(input)).toLowerCase();
+    const output = outputPathFor(input, target, flags.out);
+    const pages = parsePages(flags.pages);
+    if (flags.pages !== undefined && pages === undefined) {
+        fail(`--pages wants a page or a range, like 3 or 2-5`, 2);
+    }
+    if ((await exists(output)) && flags.force !== true) {
+        fail(`${output} already exists — pass --force to replace it, or --out to write somewhere else`);
+    }
+
+    const plan = planFor({ input, target, output, pages });
+    if (plan.error !== undefined) {
+        fail(plan.error, 2);
+    }
+    await requireTools(undefined, plan.steps.map((step) => step.command));
+    for (const step of plan.steps) {
+        await runOrFail(step.command, step.args, { capture: true });
+    }
+    process.stdout.write(`${output}\n`);
+    process.stderr.write(`paperwork: ${plan.note}\n`);
+};
+
+const read = async ({ flags, positional }) => {
+    const [input] = positional;
+    if (input === undefined) {
+        fail(`read needs a PDF`, 2);
+    }
+    await needFile(input);
+    await requireTools(`read`);
+    const pages = parsePages(flags.pages);
+    const args = [`-layout`];
+    if (pages !== undefined) {
+        args.push(`-f`, String(pages.first), `-l`, String(pages.last));
+    }
+    // "-" is pdftotext's stdout, so the text lands where a shell pipeline expects it.
+    const result = await runOrFail(`pdftotext`, [...args, input, `-`], { capture: true });
+    if (result.out.trim() === ``) {
+        fail(`this PDF has no text layer — it is probably a scan. Try: paperwork ocr ${basename(input)}`);
+    }
+    process.stdout.write(result.out);
+};
+
+const ocr = async ({ flags, positional }) => {
+    const [input] = positional;
+    if (input === undefined) {
+        fail(`ocr needs a PDF or an image`, 2);
+    }
+    await needFile(input);
+    const language = flags.lang ?? `eng`;
+    if (IMAGE_LIKE.has(extensionOf(input))) {
+        await requireTools(undefined, [`tesseract`]);
+        const result = await runOrFail(`tesseract`, [input, `stdout`, `-l`, language], { capture: true });
+        process.stdout.write(result.out);
+        return;
+    }
+    await requireTools(`ocr`);
+    // Rasterise, then recognise page by page: tesseract reads images, not PDFs, and doing it per page keeps
+    // the output in reading order and the memory bounded on a long document.
+    const workdir = join(process.env.TMPDIR ?? `/tmp`, `paperwork-${process.pid}`);
+    await mkdir(workdir, { recursive: true });
+    await runOrFail(`pdftoppm`, [`-r`, `200`, `-png`, input, join(workdir, `page`)], { capture: true });
+    const pages = (await readdir(workdir)).filter((name) => name.endsWith(`.png`)).sort();
+    if (pages.length === 0) {
+        fail(`nothing to read in ${input}`);
+    }
+    for (const page of pages) {
+        const result = await runOrFail(`tesseract`, [join(workdir, page), `stdout`, `-l`, language], { capture: true });
+        process.stdout.write(result.out);
+    }
+};
+
+const IMAGE_LIKE = new Set([`jpg`, `jpeg`, `png`, `tif`, `tiff`, `bmp`, `webp`]);
+
+const merge = async ({ flags, positional }) => {
+    const [output, ...inputs] = positional;
+    if (output === undefined || inputs.length === 0) {
+        fail(`merge needs an output PDF and at least one input — paperwork merge all.pdf a.pdf b.pdf`, 2);
+    }
+    for (const input of inputs) {
+        await needFile(input);
+    }
+    if ((await exists(output)) && flags.force !== true) {
+        fail(`${output} already exists — pass --force to replace it`);
+    }
+    await requireTools(`merge`);
+    await runOrFail(`pdfunite`, [...inputs, output], { capture: true });
+    process.stdout.write(`${output}\n`);
+};
+
+const split = async ({ flags, positional }) => {
+    const [input] = positional;
+    if (input === undefined) {
+        fail(`split needs a PDF`, 2);
+    }
+    await needFile(input);
+    await requireTools(`split`);
+    const outDir = flags[`out-dir`] ?? dirname(input);
+    await mkdir(outDir, { recursive: true });
+    const stem = basename(input, extname(input));
+    await runOrFail(`pdfseparate`, [input, join(outDir, `${stem}-%d.pdf`)], { capture: true });
+    const produced = (await readdir(outDir)).filter((name) => name.startsWith(`${stem}-`) && name.endsWith(`.pdf`));
+    process.stdout.write(`${produced.length} page${produced.length === 1 ? `` : `s`} in ${outDir}\n`);
+};
+
+const info = async ({ positional }) => {
+    const [input] = positional;
+    if (input === undefined) {
+        fail(`info needs a PDF`, 2);
+    }
+    await needFile(input);
+    await requireTools(`info`);
+    const details = await runOrFail(`pdfinfo`, [input], { capture: true });
+    process.stdout.write(details.out);
+    const { size } = await stat(input);
+    process.stdout.write(`On disk:        ${(size / 1024 / 1024).toFixed(2)} MB\n`);
+    // Whether there is a text layer decides which of `read` and `ocr` will work, and it is the one thing
+    // pdfinfo doesn't say.
+    const text = await run(`pdftotext`, [`-l`, `1`, input, `-`], { capture: true });
+    process.stdout.write(`Text layer:     ${text.out.trim() === `` ? `no — this is a scan, use "paperwork ocr"` : `yes — "paperwork read" will work`}\n`);
+};
+
+const tools = async () => {
+    const names = [...new Set(Object.values(TOOLS).flat())].sort();
+    let missing = 0;
+    for (const name of names) {
+        const found = await which(name);
+        if (found === undefined) {
+            missing += 1;
+        }
+        process.stdout.write(`${found === undefined ? `missing` : `ok     `}  ${name}${found === undefined ? `` : `  ${found}`}\n`);
+    }
+    if (missing > 0) {
+        process.stdout.write(`\n${explainMissing(`${missing} of these`)}\n`);
+    }
+};
+
+const COMMANDS = { convert, read, ocr, merge, split, info, tools };
+
+const main = async () => {
+    const [subcommand, ...rest] = process.argv.slice(2);
+    if (subcommand === undefined || subcommand === `--help` || subcommand === `-h` || subcommand === `help`) {
+        process.stdout.write(`${USAGE}\n`);
+        return;
+    }
+    const handler = COMMANDS[subcommand];
+    if (handler === undefined) {
+        fail(`unknown command "${subcommand}"\n\n${USAGE}`, 2);
+    }
+    await handler(parseFlags(rest));
+};
+
+// Only when run as a program: the test suite imports this file to check the usage text and the dispatch table.
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+    await main();
+}
+
+export { COMMANDS, USAGE, explainMissing, parseFlags };

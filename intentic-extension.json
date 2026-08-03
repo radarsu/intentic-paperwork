@@ -1,0 +1,13 @@
+{
+    "publisher": "intentic",
+    "name": "paperwork",
+    "version": "1.0.0",
+    "category": "workspace",
+    "icon": "file-pdf",
+    "engines": { "intentic": "^0.4.0" },
+    "contributes": {
+        "environment": { "fragment": "docker/paperwork.Dockerfile" },
+        "bin": "bin",
+        "agent": { "path": "plugin" }
+    }
+}

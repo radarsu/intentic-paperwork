@@ -1,0 +1,11 @@
+{
+    "name": "intentic-paperwork",
+    "version": "1.0.0",
+    "description": "Document tools for the agent's shell — convert, read, OCR, merge and split the paperwork in your workspace",
+    "license": "MIT",
+    "private": true,
+    "type": "module",
+    "scripts": {
+        "test": "node --test test/*.test.mjs"
+    }
+}
