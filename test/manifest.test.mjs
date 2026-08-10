@@ -67,3 +67,15 @@ test(`the agent plugin directory holds the skill the CLI is useless without`, as
     assert.match(skill, /paperwork read/);
     assert.match(skill, /paperwork ocr/);
 });
+
+/* And that directory has to BE a plugin, not just contain a skills folder. The daemon hands the path to the
+ * Agent SDK's loader without parsing it, and the loader recognises a plugin by its `.claude-plugin/plugin.json`
+ * — so a directory without one is a contribution that installs clean, reports ready, and teaches the agent
+ * nothing. There is no error anywhere in that path, which is exactly why it is asserted here. */
+test(`the agent plugin directory is a plugin the SDK's loader will recognise`, async () => {
+    const descriptor = JSON.parse(await readFile(url(`../${manifest.contributes.agent.path}/.claude-plugin/plugin.json`), `utf8`));
+    assert.equal(descriptor.name, `paperwork`);
+    // The description is what the agent reads when deciding whether this plugin is worth loading, so an empty
+    // one is a plugin that ships its skill and never gets asked for it.
+    assert.ok(descriptor.description.length > 0);
+});

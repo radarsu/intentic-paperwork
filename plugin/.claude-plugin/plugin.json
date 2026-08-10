@@ -1,0 +1,8 @@
+{
+    "name": "paperwork",
+    "description": "Teaches the agent that this sandbox has a `paperwork` CLI for documents — reading a PDF's text layer, OCRing a scan or a photographed receipt, converting between PDF/docx/odt/epub/markdown, and merging or splitting PDFs — and, above all, which of those two PDF paths a given file actually needs. Ships the `paperwork` skill; the CLI itself arrives on PATH from the same extension.",
+    "version": "1.0.0",
+    "author": { "name": "intentic" },
+    "homepage": "https://github.com/radarsu/intentic-paperwork",
+    "repository": "https://github.com/radarsu/intentic-paperwork"
+}
