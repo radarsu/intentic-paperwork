@@ -59,7 +59,7 @@ There is nothing to build. The CLI is dependency-free Node — an extension is i
 commit, with no install step, so a `node_modules` would have to be committed.
 
 ```sh
-npm test    # the planner, the CLI's behaviour, and the manifest + fragment rules
+pnpm test    # the planner, the CLI's behaviour, and the manifest + fragment rules
 ```
 
 The fragment test is worth knowing about: it reimplements the daemon's `invalidExtensionFragment` rule and runs
