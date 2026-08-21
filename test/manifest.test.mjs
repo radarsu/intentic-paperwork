@@ -4,7 +4,7 @@ import { test } from "node:test";
 
 /* The manifest, and the one rule that decides whether this extension can be installed at all: the daemon
  * refuses an image fragment that is anything other than RUN/ENV. That check is `invalidExtensionFragment` in
- * the daemon (fragment-sources.ts) and it is reimplemented here — a copy of a rule is worth it when the
+ * the daemon (fragment-sources.ts) and it is reimplemented here: a copy of a rule is worth it when the
  * alternative is finding out at install time, on someone else's machine, that the fragment is rejected. */
 
 const url = (path) => new URL(path, import.meta.url);
@@ -47,7 +47,7 @@ test(`the image fragment is RUN/ENV only, so the daemon will accept it`, async (
     assert.match(fragment, /ENV PAPERWORK_LAYER=1/);
 });
 
-test(`the fragment check is real — it rejects what the daemon rejects`, () => {
+test(`the fragment check is real: it rejects what the daemon rejects`, () => {
     assert.ok(invalidFragmentLine(`FROM debian:bookworm\nRUN echo hi`) !== undefined);
     assert.ok(invalidFragmentLine(`COPY x /x`) !== undefined);
     // A privileged directive smuggled in a comment: the daemon greps for it, so this test has to as well.
@@ -70,7 +70,7 @@ test(`the agent plugin directory holds the skill the CLI is useless without`, as
 
 /* And that directory has to BE a plugin, not just contain a skills folder. The daemon hands the path to the
  * Agent SDK's loader without parsing it, and the loader recognises a plugin by its `.claude-plugin/plugin.json`
- * — so a directory without one is a contribution that installs clean, reports ready, and teaches the agent
+ *: so a directory without one is a contribution that installs clean, reports ready, and teaches the agent
  * nothing. There is no error anywhere in that path, which is exactly why it is asserted here. */
 test(`the agent plugin directory is a plugin the SDK's loader will recognise`, async () => {
     const descriptor = JSON.parse(await readFile(url(`../${manifest.contributes.agent.path}/.claude-plugin/plugin.json`), `utf8`));

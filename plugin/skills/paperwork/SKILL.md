@@ -29,8 +29,8 @@ paperwork split bundle.pdf --out-dir pages/
 `read` and `ocr` are not interchangeable and choosing wrong wastes a minute and produces nonsense.
 
 1. `paperwork info file.pdf` prints **Text layer: yes/no**.
-2. **Yes** → `paperwork read` — exact text, instant, no guessing.
-3. **No** → it is a scan or a photograph. `paperwork ocr` — slower (it rasterises every page at 200 dpi and
+2. **Yes** → `paperwork read`: exact text, instant, no guessing.
+3. **No** → it is a scan or a photograph. `paperwork ocr`: slower (it rasterises every page at 200 dpi and
    recognises each one) and imperfect. Never present OCR output as exact: figures, punctuation and columns are
    where it fails, so if a number matters, say it came from OCR and offer the page image.
 
@@ -41,7 +41,7 @@ paperwork split bundle.pdf --out-dir pages/
 - The **default target** is PDF for anything except a PDF, and Markdown for a PDF. Say `--to` when you mean
   something else.
 - Output lands beside the input with the extension swapped; `--out` puts it elsewhere. Existing files are
-  **never** overwritten without `--force` — if the user asked you to replace one, pass it deliberately.
+  **never** overwritten without `--force`: if the user asked you to replace one, pass it deliberately.
 - The command prints the output path on stdout and the pipeline it used on stderr, so you can quote both.
 - Not everything is convertible: PDF → docx is not offered here, because the result of trying is a
   document that looks right and is unusable. Extract the text instead and say so.
@@ -49,11 +49,11 @@ paperwork split bundle.pdf --out-dir pages/
 ## Other languages for OCR
 
 Only English data is installed. If the user needs another language, the fix is a one-line edit to this
-extension's own image fragment (`docker/paperwork.Dockerfile` — add `tesseract-ocr-deu`, `tesseract-ocr-fra`,
+extension's own image fragment (`docker/paperwork.Dockerfile`: add `tesseract-ocr-deu`, `tesseract-ocr-fra`,
 …), which the owner then approves and rebuilds. Tell them that rather than trying to install it at runtime: an
 apt install inside the container is lost the moment it is recreated.
 
 ## When nothing works
 
 If every command reports a missing tool, the image layer hasn't been applied. The owner has to approve it in
-**Sandbox → Environment** and rebuild — you cannot do it for them, and there is no runtime workaround.
+**Sandbox → Environment** and rebuild: you cannot do it for them, and there is no runtime workaround.
