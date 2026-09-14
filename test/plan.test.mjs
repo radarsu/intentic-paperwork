@@ -2,8 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { defaultTarget, outputPathFor, parsePages, planFor } from "../lib/plan.mjs";
 
-/* The planner: which binary runs for which pair of formats, and what the output is called. Pure, so none of
- * the tools have to be installed to test the part that decides between them. */
+/* The planner: which binary runs for which pair of formats, and what the output is called. */
 
 test(`a PDF defaults to getting the words out; everything else defaults to a finished PDF`, () => {
     assert.equal(defaultTarget(`statement.pdf`), `md`);

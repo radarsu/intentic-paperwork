@@ -7,9 +7,7 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
-/* The CLI as a program, run the way the agent will run it. What is worth testing here is not the conversions
- * (those are pandoc's and poppler's job) but the behaviour around them: refusing clearly, never silently
- * overwriting, and above all explaining a missing binary in terms of the rebuild the owner has to approve. */
+/* The CLI as a program, run the way the agent will run it. */
 
 const run = promisify(execFile);
 const CLI = fileURLToPath(new URL(`../bin/paperwork`, import.meta.url));
@@ -44,9 +42,7 @@ test(`a missing file is named, and never reaches a tool`, async () => {
     assert.match(stderr, /no such file/);
 });
 
-/* The most important message this pack has. With no PAPERWORK_LAYER in the environment the image simply
- * hasn't been rebuilt with the fragment yet, and the fix is a specific thing the OWNER does: an agent that
- * reads "spawn pandoc ENOENT" will go and try to apt-get it, which fails and would be lost anyway. */
+/* The most important message this pack has. With no PAPERWORK_LAYER in the environment the image simply. */
 test(`a missing tool explains the rebuild rather than reporting ENOENT`, async () => {
     const directory = await mkdtemp(join(tmpdir(), `paperwork-`));
     const document = join(directory, `notes.md`);
